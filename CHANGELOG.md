@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+## [0.44.4] - 2026-11-14
+* fix: client stdout race (https://github.com/zellij-org/zellij/pull/5693)
+
 ## [0.44.3] - 2026-05-13
 * fix(windows): bump windows-sys to 0.59 to align manifest with code, fixing source builds via `cargo install`/`cargo binstall` (https://github.com/zellij-org/zellij/pull/5139)
 * fix: deadlock with --blocking panes (https://github.com/zellij-org/zellij/pull/5152)
