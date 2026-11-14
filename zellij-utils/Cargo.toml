@@ -46,7 +46,6 @@ tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7", default-features = false, features = ["compat", "io"] }
 log4rs = { version = "1.2.0", default-features = false, features = ["pattern_encoder", "rolling_file_appender", "compound_policy", "fixed_window_roller", "size_trigger"] }
 interprocess = { workspace = true }
-openssl-sys = { version = "0.9.93", default-features = false, features = ["vendored"], optional = true }
 isahc = { workspace = true }
 curl-sys = { version = "0.4", default-features = false, features = ["force-system-lib-on-osx", "ssl"], optional = true }
 humantime = { workspace = true }
@@ -57,6 +56,9 @@ notify = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
+# Static OpenSSL for the vendored curl. Unix only: on Windows curl uses Schannel, and
+# OpenSSL's MSVC build can't run from a non-Windows host (cross-compiling with cargo-xwin).
+openssl-sys = { version = "0.9.93", default-features = false, features = ["vendored"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 crossterm = { workspace = true, features = ["events"] }
