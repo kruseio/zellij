@@ -8,8 +8,8 @@
 #   curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/kruseio/zellij/HEAD/install.sh \
 #     | sh -s -- --version v0.44.4 --bin-dir "$HOME/.local/bin"
 #
-# Supports Linux x86_64, macOS x86_64/aarch64, and Windows x86_64 from Git Bash,
-# MSYS2 or Cygwin. In native PowerShell use install.ps1 instead.
+# Supports Linux x86_64, macOS (one universal binary for Apple Silicon and Intel), and
+# Windows x86_64 from Git Bash, MSYS2 or Cygwin. In native PowerShell use install.ps1.
 #
 # Everything runs from main() at the bottom, so a partially downloaded script
 # never executes.
@@ -79,13 +79,7 @@ detect_platform() {
 
     case "$_uname_s" in
         Linux) os=linux ;;
-        Darwin)
-            os=macos
-            # Under Rosetta 2 uname reports x86_64 on Apple Silicon; prefer the native build.
-            if [ "$_arch" = x86_64 ] && [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
-                _arch=arm64
-            fi
-            ;;
+        Darwin) os=macos ;;
         MINGW* | MSYS* | CYGWIN* | Windows_NT) os=windows ;;
         *) err "unsupported operating system: $_uname_s" ;;
     esac
@@ -96,11 +90,12 @@ detect_platform() {
         *) _arch=unsupported ;;
     esac
 
-    # Published builds: Linux and Windows x86_64 only; macOS x86_64 and aarch64.
+    # Published builds: Linux and Windows x86_64 only; one universal macOS binary that
+    # runs natively on both Apple Silicon and Intel.
     case "${os}-${_arch}" in
         linux-x86_64) target="x86_64-unknown-linux-musl" ;;
         windows-x86_64) target="x86_64-pc-windows-msvc" ;;
-        macos-x86_64 | macos-aarch64) target="${_arch}-apple-darwin" ;;
+        macos-x86_64 | macos-aarch64) target="universal-apple-darwin" ;;
         macos-*) err "unsupported architecture: $(uname -m) (macOS builds exist for x86_64 and aarch64)" ;;
         *) err "unsupported architecture: $(uname -m) (${os} builds exist for x86_64 only)" ;;
     esac

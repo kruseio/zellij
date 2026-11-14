@@ -57,7 +57,7 @@ For more details about our future plans, read about upcoming features in our [ro
 
 #### Install script (kruseio/zellij releases)
 
-To install a prebuilt binary from the [kruseio/zellij releases](https://github.com/kruseio/zellij/releases), run the install script. It picks the right build for your OS and architecture (Linux x86_64, macOS x86_64/aarch64, Windows x86_64; only builds without the web server are published) and verifies its SHA-256 checksum.
+To install a prebuilt binary from the [kruseio/zellij releases](https://github.com/kruseio/zellij/releases), run the install script. It picks the right build for your OS and architecture (Linux x86_64, macOS as one universal binary for Apple Silicon and Intel, Windows x86_64; only builds without the web server are published) and verifies its SHA-256 checksum.
 
 If `zellij` is already on your `PATH`, whether an official build or this fork, the script replaces that binary in place, upgrading or downgrading it to the selected version (latest by default). If it came from a package manager such as Homebrew or apt, uninstall it there afterwards and rerun the script, so a later package upgrade doesn't put it back.
 

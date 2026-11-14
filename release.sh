@@ -1,17 +1,19 @@
 #!/bin/sh
 # Build and publish zellij release artifacts (no-web builds only) without GitHub Actions.
 #
-# Artifacts use the upstream release workflow's names, which install.sh and
-# install.ps1 download:
+# Artifacts, which install.sh and install.ps1 download:
 #   zellij-no-web-<target>.tar.gz   (.zip on Windows) archive holding the zellij binary
 #   zellij-no-web-<target>.sha256sum  "<sha256>  zellij" for the binary inside it
+# for the targets x86_64-unknown-linux-musl, x86_64-pc-windows-msvc and
+# universal-apple-darwin (one macOS binary for both Apple Silicon and Intel).
 #
-# Release flow, e.g. for v0.44.4. Each `build` runs in a checkout whose HEAD is the tag;
-# artifacts land in target/release-assets/<tag>/.
-#   1. Linux x86_64 host with Docker and cargo-xwin:
+# Everything is built with plain cargo, no Docker. Release flow, e.g. for v0.44.4; each
+# `build` runs in a checkout whose HEAD is the tag, and artifacts land in
+# target/release-assets/<tag>/:
+#   1. Linux x86_64 host with musl-tools, cargo-xwin and LLVM (clang, lld, llvm-lib):
 #        ./release.sh build v0.44.4     # Linux musl x86_64, Windows x86_64
-#   2. macOS host:
-#        ./release.sh build v0.44.4     # macOS aarch64 + x86_64
+#   2. macOS host with Xcode command line tools:
+#        ./release.sh build v0.44.4     # macOS universal (aarch64 + x86_64)
 #   3. Copy the Linux host's target/release-assets/v0.44.4/* into the same directory
 #      on the macOS host, then from there:
 #        ./release.sh publish v0.44.4
@@ -19,7 +21,8 @@
 set -eu
 
 REPO="${ZELLIJ_REPO:-kruseio/zellij}"
-ALL_TARGETS="x86_64-unknown-linux-musl aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-msvc"
+ALL_TARGETS="x86_64-unknown-linux-musl x86_64-pc-windows-msvc universal-apple-darwin"
+MACOS_SLICES="aarch64-apple-darwin x86_64-apple-darwin"
 
 usage() {
     cat <<EOF
@@ -29,12 +32,11 @@ USAGE:
     release.sh build <TAG> [TARGET...]
         Build and package TARGETs into target/release-assets/<TAG>/.
         HEAD must be the tagged commit with no uncommitted changes to tracked files.
-        Builds always use ./target (./target/xwin for Windows), ignoring CARGO_TARGET_DIR,
-        and rewrite the bundled plugins in zellij-utils/assets/plugins, so prefer a
-        dedicated worktree:
+        Builds always use ./target, ignoring CARGO_TARGET_DIR, and rewrite the bundled
+        plugins in zellij-utils/assets/plugins, so prefer a dedicated worktree:
             git worktree add ../zellij-<TAG> <TAG>
         Default targets: on Linux x86_64-unknown-linux-musl x86_64-pc-windows-msvc;
-        on macOS aarch64-apple-darwin x86_64-apple-darwin.
+        on macOS universal-apple-darwin.
 
     release.sh publish <TAG> [--draft]
         Verify that target/release-assets/<TAG>/ holds checksummed artifacts for every
@@ -126,23 +128,24 @@ no_web_features() {
     printf '%s' "$_features"
 }
 
-# Cargo target dir for <target>. The Windows build runs natively (cargo-xwin) while Linux
-# builds run in cross's Docker container; sharing one target dir makes each invalidate the
-# other's host build scripts and proc-macros, forcing a full rebuild on every switch.
-target_dir() { # <target>
-    case "$1" in
-        *-pc-windows-msvc) printf '%s/target/xwin' "$root" ;;
-        *) printf '%s/target' "$root" ;;
-    esac
+# Build the release binary for one target; plain cargo, except cargo-xwin for Windows.
+cargo_build() { # <rust target> [cargo build args...]
+    _t=$1
+    shift
+    rustup target add "$_t"
+    cargo build --release --target "$_t" --no-default-features --features "$features" "$@"
 }
 
 build_target() { # <target>
     say "building $1"
-    rustup target add "$1"
-    CARGO_TARGET_DIR=$(target_dir "$1")
-    export CARGO_TARGET_DIR
     case "$1" in
-        *-pc-windows-msvc)
+        x86_64-unknown-linux-musl)
+            [ "$(uname -s)" = Linux ] || err "build $1 on a Linux host"
+            # The C dependencies (OpenSSL, curl, zlib, ...) are compiled with musl-gcc.
+            has musl-gcc || err "need musl-gcc to build $1 (e.g. sudo apt install musl-tools)"
+            cargo_build "$1"
+            ;;
+        x86_64-pc-windows-msvc)
             has cargo-xwin || err "need cargo-xwin to build $1 (cargo install --locked cargo-xwin)"
             # C dependencies need llvm-lib, which Debian/Ubuntu only ship in a versioned dir
             # unless the unversioned `llvm` package is installed.
@@ -156,23 +159,30 @@ build_target() { # <target>
                 done
             fi
             has llvm-lib || err "need llvm-lib to build $1 (install LLVM, e.g. apt install llvm)"
-            _features=$(no_web_features)
-            cargo xtask build --release --plugins-only --no-web
+            rustup target add "$1"
             # Static CRT, as in the upstream workflow, so zellij.exe needs no VC++ runtime.
             RUSTFLAGS="-C target-feature=+crt-static" \
-                cargo xwin build --release --target "$1" --no-default-features --features "$_features"
+                cargo xwin build --release --target "$1" --no-default-features --features "$features"
             ;;
-        *)
-            # Same entry point as the upstream release workflow: builds the plugins, then
-            # the binary with `cross` (Docker for Linux targets, plain cargo for macOS).
-            cargo xtask ci cross "$1" --no-web
+        universal-apple-darwin)
+            [ "$(uname -s)" = Darwin ] || err "build $1 on a macOS host"
+            need lipo
+            set --
+            for _slice in $MACOS_SLICES; do
+                cargo_build "$_slice"
+                set -- "$@" "${root}/target/${_slice}/release/zellij"
+            done
+            mkdir -p "${root}/target/universal-apple-darwin/release"
+            lipo -create -output "${root}/target/universal-apple-darwin/release/zellij" "$@"
+            lipo -info "${root}/target/universal-apple-darwin/release/zellij"
             ;;
+        *) err "unknown target: $1" ;;
     esac
 }
 
 package_target() { # <target>
     _exe=$(exe_name "$1")
-    _bin="$(target_dir "$1")/$1/release/${_exe}"
+    _bin="${root}/target/$1/release/${_exe}"
     [ -f "$_bin" ] || err "build did not produce ${_bin}"
     _archive="${assets}/$(archive_name "$1")"
     _stage=$(mktemp -d)
@@ -221,20 +231,21 @@ cmd_build() {
     check_checkout "$tag"
     need cargo
     need rustup
-    # build_target always builds into this checkout's own target dir (even if
-    # CARGO_TARGET_DIR points at a shared cache), so the packaged binaries can only come
-    # from this checkout.
-
-    # Use every hardware thread for the parallel part of the build, overriding lower
-    # defaults such as a shared host's CARGO_BUILD_JOBS (cross passes it into Docker).
+    # Build into this checkout's own target dir (even if CARGO_TARGET_DIR points at a
+    # shared cache), so the packaged binaries can only come from this checkout. All
+    # targets share it, so host build scripts and proc-macros are compiled only once.
+    CARGO_TARGET_DIR="${root}/target"
+    export CARGO_TARGET_DIR
+    # Use every hardware thread, overriding lower defaults such as a shared host's
+    # CARGO_BUILD_JOBS.
     CARGO_BUILD_JOBS="${ZELLIJ_RELEASE_JOBS:-$(cpu_count)}"
     export CARGO_BUILD_JOBS
-    say "building with ${CARGO_BUILD_JOBS} parallel jobs"
+    features=$(no_web_features)
 
     if [ $# -eq 0 ]; then
         case "$(uname -s)" in
             Linux) set -- x86_64-unknown-linux-musl x86_64-pc-windows-msvc ;;
-            Darwin) set -- aarch64-apple-darwin x86_64-apple-darwin ;;
+            Darwin) set -- universal-apple-darwin ;;
             *) err "no default targets for $(uname -s); pass them explicitly" ;;
         esac
     fi
@@ -246,6 +257,9 @@ cmd_build() {
     done
 
     mkdir -p "$assets"
+    say "building $* with ${CARGO_BUILD_JOBS} parallel jobs"
+    # The plugins are embedded in every binary; build them once for all targets.
+    cargo xtask build --release --plugins-only --no-web
     for t in "$@"; do
         build_target "$t"
         package_target "$t"
