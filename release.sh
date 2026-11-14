@@ -29,8 +29,9 @@ USAGE:
     release.sh build <TAG> [TARGET...]
         Build and package TARGETs into target/release-assets/<TAG>/.
         HEAD must be the tagged commit with no uncommitted changes to tracked files.
-        Builds always use ./target, ignoring CARGO_TARGET_DIR, and rewrite the bundled
-        plugins in zellij-utils/assets/plugins, so prefer a dedicated worktree:
+        Builds always use ./target (./target/xwin for Windows), ignoring CARGO_TARGET_DIR,
+        and rewrite the bundled plugins in zellij-utils/assets/plugins, so prefer a
+        dedicated worktree:
             git worktree add ../zellij-<TAG> <TAG>
         Default targets: on Linux x86_64-unknown-linux-musl x86_64-pc-windows-msvc;
         on macOS aarch64-apple-darwin x86_64-apple-darwin.
@@ -44,7 +45,9 @@ TARGETS:
     ${ALL_TARGETS}
 
 ENVIRONMENT:
-    ZELLIJ_REPO    GitHub owner/repo to publish to [default: kruseio/zellij]
+    ZELLIJ_REPO           GitHub owner/repo to publish to [default: kruseio/zellij]
+    ZELLIJ_RELEASE_JOBS   Parallel build jobs [default: all hardware threads, ignoring
+                          CARGO_BUILD_JOBS]
 EOF
 }
 
@@ -55,6 +58,10 @@ err() {
 }
 has() { command -v "$1" >/dev/null 2>&1; }
 need() { has "$1" || err "need '$1' (command not found)"; }
+
+cpu_count() {
+    getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4
+}
 
 archive_name() {
     case "$1" in
@@ -119,9 +126,21 @@ no_web_features() {
     printf '%s' "$_features"
 }
 
+# Cargo target dir for <target>. The Windows build runs natively (cargo-xwin) while Linux
+# builds run in cross's Docker container; sharing one target dir makes each invalidate the
+# other's host build scripts and proc-macros, forcing a full rebuild on every switch.
+target_dir() { # <target>
+    case "$1" in
+        *-pc-windows-msvc) printf '%s/target/xwin' "$root" ;;
+        *) printf '%s/target' "$root" ;;
+    esac
+}
+
 build_target() { # <target>
     say "building $1"
     rustup target add "$1"
+    CARGO_TARGET_DIR=$(target_dir "$1")
+    export CARGO_TARGET_DIR
     case "$1" in
         *-pc-windows-msvc)
             has cargo-xwin || err "need cargo-xwin to build $1 (cargo install --locked cargo-xwin)"
@@ -153,7 +172,7 @@ build_target() { # <target>
 
 package_target() { # <target>
     _exe=$(exe_name "$1")
-    _bin="${root}/target/$1/release/${_exe}"
+    _bin="$(target_dir "$1")/$1/release/${_exe}"
     [ -f "$_bin" ] || err "build did not produce ${_bin}"
     _archive="${assets}/$(archive_name "$1")"
     _stage=$(mktemp -d)
@@ -202,10 +221,15 @@ cmd_build() {
     check_checkout "$tag"
     need cargo
     need rustup
-    # Always build into this checkout's own target dir (even if CARGO_TARGET_DIR points at a
-    # shared cache), so the packaged binaries can only come from this checkout.
-    CARGO_TARGET_DIR="${root}/target"
-    export CARGO_TARGET_DIR
+    # build_target always builds into this checkout's own target dir (even if
+    # CARGO_TARGET_DIR points at a shared cache), so the packaged binaries can only come
+    # from this checkout.
+
+    # Use every hardware thread for the parallel part of the build, overriding lower
+    # defaults such as a shared host's CARGO_BUILD_JOBS (cross passes it into Docker).
+    CARGO_BUILD_JOBS="${ZELLIJ_RELEASE_JOBS:-$(cpu_count)}"
+    export CARGO_BUILD_JOBS
+    say "building with ${CARGO_BUILD_JOBS} parallel jobs"
 
     if [ $# -eq 0 ]; then
         case "$(uname -s)" in
