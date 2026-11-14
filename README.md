@@ -55,6 +55,26 @@ For more details about our future plans, read about upcoming features in our [ro
 
 ## How do I install it?
 
+#### Install script (kruseio/zellij releases)
+
+To install a prebuilt binary from the [kruseio/zellij releases](https://github.com/kruseio/zellij/releases), run the install script. It picks the right build for your OS and architecture (Linux x86_64, macOS x86_64/aarch64, Windows x86_64; only builds without the web server are published) and verifies its SHA-256 checksum.
+
+If `zellij` is already on your `PATH`, whether an official build or this fork, the script replaces that binary in place, upgrading or downgrading it to the selected version (latest by default). If it came from a package manager such as Homebrew or apt, uninstall it there afterwards and rerun the script, so a later package upgrade doesn't put it back.
+
+Linux, macOS, and Windows from Git Bash/MSYS2/Cygwin:
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/kruseio/zellij/HEAD/install.sh | sh
+```
+A fresh install goes to `/usr/local/bin` (using `sudo` if needed). Pass options after `sh -s --`, e.g. `sh -s -- --version v0.44.4 --bin-dir "$HOME/.local/bin"`; see `--help`.
+
+Windows (PowerShell):
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/kruseio/zellij/HEAD/install.ps1 | iex"
+```
+A fresh install goes to `%USERPROFILE%\.local\bin`, which is added to your user `PATH`. Set `ZELLIJ_VERSION`, `ZELLIJ_INSTALL_DIR` or `ZELLIJ_NO_MODIFY_PATH=1` to change that.
+
+#### Other ways to install
+
 The easiest way to install Zellij is through a [package for your OS](./docs/THIRD_PARTY_INSTALL.md).
 
 If one is not available for your OS, you could download a prebuilt binary from the [latest release](https://github.com/zellij-org/zellij/releases/latest) and place it in your `$PATH`. If you'd like, we could [automatically choose one for you](#try-zellij-without-installing).
